@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Expense Tracker</title>
+  <style>
+    :root{--bg:#f6f8fb;--card:#fff;--accent:#2563eb;--danger:#ef4444;--muted:#6b7280}
+    *{box-sizing:border-box}
+    body{font-family:Inter, system-ui, Arial; margin:0; padding:24px; background:var(--bg); display:flex; justify-content:center}
+    .container{max-width:980px;width:100%;}
+    header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+    h1{margin:0;font-size:20px}
+    .card{background:var(--card);border-radius:12px;padding:14px;box-shadow:0 8px 24px rgba(12,15,30,.06);margin-bottom:12px}
+    form.row{display:flex;gap:8px;flex-wrap:wrap}
+    form.row > *{flex:1;min-width:160px}
+    input, select, textarea, button{padding:8px;border-radius:8px;border:1px solid #e6e7ef;font-size:14px}
+    button.primary{background:var(--accent);color:#fff;border:0;cursor:pointer}
+    button.ghost{background:transparent;border:1px solid #e6e7ef;cursor:pointer}
+    .controls{display:flex;gap:8px;align-items:center;margin-top:10px}
+    .summary{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    .summary .item{background:#fafbff;padding:10px 12px;border-radius:8px;border:1px solid #eef2ff;min-width:150px}
+    #transactions{width:100%;border-collapse:collapse;margin-top:12px}
+    #transactions th, #transactions td{padding:8px;border-bottom:1px solid #f0f1f7;text-align:left}
+    #transactions th{background:#fbfdff}
+    .actions button{margin-right:6px}
+    .small{font-size:13px;color:var(--muted)}
+    canvas{max-width:100%;height:160px}
+    @media (max-width:780px){ form.row{flex-direction:column} .summary{flex-direction:column} }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Expense Tracker</h1>
+      <div class="small">Saved in localStorage</div>
+    </header>
+
+    <!-- Add / Edit form -->
+    <section class="card">
+      <form id="tx-form" class="row" onsubmit="return false;">
+        <input id="amount" type="number" step="0.01" placeholder="Amount (e.g., 499.50)" />
+        <select id="type">
+          <option value="expense">Expense</option>
+          <option value="income">Income</option>
+        </select>
+        <input id="category" type="text" placeholder="Category (e.g., Food, Salary)" />
+        <input id="date" type="date" />
+        <input id="note" type="text" placeholder="Note (optional)" />
+        <div style="min-width:150px;display:flex;gap:8px">
+          <button id="add-btn" class="primary">Add</button>
+          <button id="cancel-edit" class="ghost" style="display:none">Cancel</button>
+        </div>
+      </form>
+
+      <div class="controls" style="margin-top:10px">
+        <label class="small">From: <input id="from" type="date" /></label>
+        <label class="small">To: <input id="to" type="date" /></label>
+        <label class="small">Category:
+          <select id="filter-category">
+            <option value="all">All</option>
+          </select>
+        </label>
+        <input id="search" type="search" placeholder="Search note/category" style="flex:1;min-width:180px" />
+        <button id="export" class="ghost">Export CSV</button>
+        <button id="clear-all" class="ghost" style="color:var(--danger);border-color:#fdecea">Clear All</button>
+      </div>
+    </section>
+
+    <!-- Summary -->
+    <section class="card summary" id="summary-card">
+      <div class="item">
+        <div class="small">Total Income</div>
+        <div id="total-income" style="font-weight:700">₹0.00</div>
+      </div>
+      <div class="item">
+        <div class="small">Total Expense</div>
+        <div id="total-expense" style="font-weight:700">₹0.00</div>
+      </div>
+      <div class="item">
+        <div class="small">Balance</div>
+        <div id="balance" style="font-weight:700">₹0.00</div>
+      </div>
+      <div style="flex:1"></div>
+      <div style="min-width:260px">
+        <div class="small">Expenses by Category</div>
+        <canvas id="catChart" width="400" height="160"></canvas>
+      </div>
+    </section>
+
+    <!-- Transactions Table -->
+    <section class="card">
+      <table id="transactions">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Type</th>
+            <th>Category</th>
+            <th>Note</th>
+            <th>Amount</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="tx-body"></tbody>
+      </table>
+      <div class="small" style="margin-top:8px" id="row-count">0 transactions</div>
+    </section>
+  </div>
+
+  <script>
+    // ---------- Config & storage ----------
+    const STORAGE_KEY = 'expense_tracker_v1';
+    let transactions = loadTransactions();
+    let editId = null;
+
+    // DOM refs
+    const amountEl = document.getElementById('amount');
+    const typeEl = document.getElementById('type');
+    const categoryEl = document.getElementById('category');
+    const dateEl = document.getElementById('date');
+    const noteEl = document.getElementById('note');
+    const addBtn = document.getElementById('add-btn');
+    const cancelEditBtn = document.getElementById('cancel-edit');
+
+    const fromEl = document.getElementById('from');
+    const toEl = document.getElementById('to');
+    const filterCategoryEl = document.getElementById('filter-category');
+    const searchEl = document.getElementById('search');
+
+    const txBody = document.getElementById('tx-body');
+    const totalIncomeEl = document.getElementById('total-income');
+    const totalExpenseEl = document.getElementById('total-expense');
+    const balanceEl = document.getElementById('balance');
+    const rowCountEl = document.getElementById('row-count');
+
+    const exportBtn = document.getElementById('export');
+    const clearAllBtn = document.getElementById('clear-all');
+
+    const chartCanvas = document.getElementById('catChart');
+    const chartCtx = chartCanvas.getContext('2d');
+
+    // ---------- Initialization ----------
+    dateEl.value = (new Date()).toISOString().slice(0,10); // default today
+    renderFilterCategories();
+    renderTransactions();
+
+    // ---------- Storage helpers ----------
+    function loadTransactions(){
+      try{
+        const raw = localStorage.getItem(STORAGE_KEY);
+        return raw ? JSON.parse(raw) : [];
+      }catch(e){
+        console.error('load error', e);
+        return [];
+      }
+    }
+    function saveTransactions(){
+      try{
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(transactions));
+      }catch(e){
+        console.error('save error', e);
+      }
+    }
+
+    // ---------- Utility ----------
+    function generateId(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
+    function fmtCur(v){ return '₹' + Number(v).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2}); }
+    function fmtDate(d){ return d; } // date is YYYY-MM-DD
+
+    // ---------- CRUD ----------
+    addBtn.addEventListener('click', () => {
+      const amount = parseFloat(amountEl.value);
+      const type = typeEl.value;
+      const category = categoryEl.value.trim() || 'Uncategorized';
+      const date = dateEl.value;
+      const note = noteEl.value.trim();
+
+      if (isNaN(amount) || amount <= 0) { alert('Please enter a valid amount > 0'); return; }
+      if (!date) { alert('Please pick a date'); return; }
+
+      if (editId) {
+        // update
+        transactions = transactions.map(t => t.id === editId ? {...t, amount, type, category, date, note} : t);
+        editId = null;
+        addBtn.textContent = 'Add';
+        cancelEditBtn.style.display = 'none';
+      } else {
+        // add
+        transactions.unshift({
+          id: generateId(),
+          amount,
+          type,
+          category,
+          date,
+          note
+        });
+      }
+
+      saveTransactions();
+      renderFilterCategories();
+      renderTransactions();
+      // reset form
+      amountEl.value = '';
+      categoryEl.value = '';
+      noteEl.value = '';
+      dateEl.value = (new Date()).toISOString().slice(0,10);
+    });
+
+    cancelEditBtn.addEventListener('click', () => {
+      editId = null;
+      addBtn.textContent = 'Add';
+      cancelEditBtn.style.display = 'none';
+      amountEl.value = '';
+      categoryEl.value = '';
+      noteEl.value = '';
+      dateEl.value = (new Date()).toISOString().slice(0,10);
+      typeEl.value = 'expense';
+    });
+
+    function startEdit(id){
+      const t = transactions.find(x => x.id === id);
+      if(!t) return;
+      editId = id;
+      amountEl.value = t.amount;
+      typeEl.value = t.type;
+      categoryEl.value = t.category;
+      dateEl.value = t.date;
+      noteEl.value = t.note;
+      addBtn.textContent = 'Update';
+      cancelEditBtn.style.display = 'inline-block';
+      window.scrollTo({top:0, behavior:'smooth'});
+    }
+
+    function deleteTx(id){
+      if(!confirm('Delete this transaction?')) return;
+      transactions = transactions.filter(t => t.id !== id);
+      saveTransactions();
+      renderFilterCategories();
+      renderTransactions();
+    }
+
+    // ---------- Rendering ----------
+    function renderTransactions(){
+      // apply filters
+      const from = fromEl.value;
+      const to = toEl.value;
+      const filterCat = filterCategoryEl.value;
+      const q = (searchEl.value || '').trim().toLowerCase();
+
+      const visible = transactions.filter(t => {
+        if (filterCat !== 'all' && t.category !== filterCat) return false;
+        if (from && t.date < from) return false;
+        if (to && t.date > to) return false;
+        if (q) {
+          const hay = (t.note + ' ' + t.category).toLowerCase();
+          if (!hay.includes(q)) return false;
+        }
+        return true;
+      });
+
+      // build rows
+      txBody.innerHTML = '';
+      visible.forEach(t => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${fmtDate(t.date)}</td>
+          <td>${t.type}</td>
+          <td>${escapeHtml(t.category)}</td>
+          <td>${escapeHtml(t.note)}</td>
+          <td style="font-weight:700">${t.type === 'expense' ? '-' : ''}${fmtCur(t.amount)}</td>
+          <td class="actions">
+            <button class="ghost" onclick="startEdit('${t.id}')">Edit</button>
+            <button class="ghost" onclick="deleteTx('${t.id}')" style="color:var(--danger)">Delete</button>
+          </td>
+        `;
+        txBody.appendChild(tr);
+      });
+
+      rowCountEl.textContent = `${visible.length} transaction${visible.length === 1 ? '' : 's'}`;
+
+      renderSummary();
+      renderCategoryChart();
+    }
+
+    // Make functions globally callable from inline onclick
+    window.startEdit = startEdit;
+    window.deleteTx = deleteTx;
+
+    // ---------- Summary ----------
+    function renderSummary(){
+      const from = fromEl.value;
+      const to = toEl.value;
+      const filterCat = filterCategoryEl.value;
+      const q = (searchEl.value || '').trim().toLowerCase();
+
+      const visible = transactions.filter(t => {
+        if (filterCat !== 'all' && t.category !== filterCat) return false;
+        if (from && t.date < from) return false;
+        if (to && t.date > to) return false;
+        if (q) {
+          const hay = (t.note + ' ' + t.category).toLowerCase();
+          if (!hay.includes(q)) return false;
+        }
+        return true;
+      });
+
+      const income = visible.filter(t => t.type === 'income').reduce((s, t)=> s + Number(t.amount), 0);
+      const expense = visible.filter(t => t.type === 'expense').reduce((s, t)=> s + Number(t.amount), 0);
+      totalIncomeEl.textContent = fmtCur(income);
+      totalExpenseEl.textContent = fmtCur(expense);
+      const bal = income - expense;
+      balanceEl.textContent = fmtCur(bal);
+    }
+
+    // ---------- Category list / filters ----------
+    function renderFilterCategories(){
+      const cats = Array.from(new Set(transactions.map(t => t.category).filter(Boolean))).sort();
+      // keep current selection
+      const current = filterCategoryEl.value || 'all';
+      filterCategoryEl.innerHTML = '<option value="all">All</option>';
+      cats.forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c; opt.textContent = c;
+        filterCategoryEl.appendChild(opt);
+      });
+      // restore if exists
+      if ([...filterCategoryEl.options].some(o => o.value === current)) filterCategoryEl.value = current;
+    }
+
+    // ---------- Chart (simple bars) ----------
+    function renderCategoryChart(){
+      // compute expense sums by category for visible transactions (consider filters)
+      const from = fromEl.value;
+      const to = toEl.value;
+      const q = (searchEl.value || '').trim().toLowerCase();
+      const visible = transactions.filter(t => {
+        if (from && t.date < from) return false;
+        if (to && t.date > to) return false;
+        if (q) {
+          const hay = (t.note + ' ' + t.category).toLowerCase();
+          if (!hay.includes(q)) return false;
+        }
+        return t.type === 'expense';
+      });
+
+      const sums = {};
+      visible.forEach(t => sums[t.category] = (sums[t.category] || 0) + Number(t.amount));
+      const entries = Object.entries(sums).sort((a,b)=>b[1]-a[1]).slice(0,8); // top 8 categories
+
+      // clear canvas
+      chartCtx.clearRect(0,0,chartCanvas.width,chartCanvas.height);
+      if (entries.length === 0){
+        // placeholder
+        chartCtx.fillStyle = '#94a3b8';
+        chartCtx.font = '14px Arial';
+        chartCtx.fillText('No expense data', 10, 30);
+        return;
+      }
+
+      // draw horizontal bars
+      const padding = 12;
+      const w = chartCanvas.width - padding*2;
+      const h = chartCanvas.height - padding*2;
+      const barH = Math.floor(h / entries.length * 0.65);
+      const gap = Math.floor((h - barH * entries.length) / Math.max(1, entries.length - 1));
+      const max = Math.max(...entries.map(e => e[1]));
+
+      entries.forEach((e, i) => {
+        const [cat, val] = e;
+        const y = padding + i * (barH + gap);
+        const barW = Math.round((val / max) * (w - 80)); // leave space for amount
+        chartCtx.fillStyle = '#e0e7ff';
+        chartCtx.fillRect(padding + 0, y, barW, barH);
+        chartCtx.fillStyle = '#1e3a8a';
+        chartCtx.font = '12px Arial';
+        chartCtx.fillText(cat, padding + barW + 6, y + Math.round(barH/2) + 4);
+        chartCtx.fillStyle = '#0f172a';
+        chartCtx.font = '11px Arial';
+        chartCtx.fillText(fmtCur(val), padding + Math.max(barW+6, w-60), y + Math.round(barH/2) + 4);
+      });
+    }
+
+    // ---------- Export CSV ----------
+    exportBtn.addEventListener('click', () => {
+      if (transactions.length === 0) { alert('No data to export'); return; }
+      const rows = [
+        ['id','date','type','category','note','amount']
+      ].concat(transactions.map(t => [t.id, t.date, t.type, t.category.replaceAll(',',' '), t.note.replaceAll(',',' '), t.amount]));
+      const csv = rows.map(r => r.map(cell => `"${String(cell).replace(/"/g,'""')}"`).join(',')).join('\n');
+      const blob = new Blob([csv], {type:'text/csv'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'transactions.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    });
+
+    // ---------- Clear data ----------
+    clearAllBtn.addEventListener('click', () => {
+      if (!confirm('Clear ALL transactions? This cannot be undone.')) return;
+      transactions = [];
+      saveTransactions();
+      renderFilterCategories();
+      renderTransactions();
+    });
+
+    // ---------- Filters event listeners ----------
+    [fromEl, toEl, filterCategoryEl, searchEl].forEach(el => el.addEventListener('input', () => {
+      renderTransactions();
+    }));
+
+    // ---------- Basic helper ----------
+    function escapeHtml(str){
+      if(!str) return '';
+      return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    // Keep canvas size in sync with displayed size
+    function resizeCanvas(){
+      const dpr = window.devicePixelRatio || 1;
+      chartCanvas.width = Math.floor(chartCanvas.clientWidth * dpr);
+      chartCanvas.height = Math.floor(chartCanvas.clientHeight * dpr);
+      chartCtx.scale(dpr, dpr);
+      renderCategoryChart();
+    }
+    window.addEventListener('resize', () => { resizeCanvas(); });
+    resizeCanvas();
+  </script>
+</body>
+</html>
