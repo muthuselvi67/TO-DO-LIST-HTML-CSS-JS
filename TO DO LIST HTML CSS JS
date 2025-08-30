@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>To‑Do List App (JavaScript + localStorage)</title>
+  <style>
+    /* Simple, responsive styling */
+    :root{ --bg:#f7f7fb; --card:#fff; --accent:#4f46e5; --muted:#6b7280 }
+    *{box-sizing:border-box}
+    body{font-family:Inter, system-ui, Arial; background:var(--bg); margin:0; padding:24px; display:flex; align-items:flex-start; justify-content:center; min-height:100vh}
+    .app{width:100%;max-width:720px}
+    header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+    h1{margin:0;font-size:20px}
+    .card{background:var(--card);padding:18px;border-radius:12px;box-shadow:0 6px 18px rgba(12,15,30,0.06)}
+    form{display:flex;gap:8px}
+    input[type="text"], .edit-input{flex:1;padding:10px 12px;border-radius:8px;border:1px solid #e6e7ef;font-size:14px}
+    button{background:var(--accent);color:#fff;border:0;padding:10px 14px;border-radius:8px;cursor:pointer}
+    .controls{display:flex;gap:8px;align-items:center;margin-top:12px}
+    #task-list{list-style:none;padding:0;margin:16px 0 0}
+    li.task{display:flex;align-items:center;gap:12px;padding:10px;border-radius:8px;border:1px solid #f0f1f7;margin-bottom:8px}
+    li.task .task-text{flex:1}
+    li.task.completed .task-text{text-decoration:line-through;color:var(--muted)}
+    .btn-ghost{background:transparent;border:0;cursor:pointer;padding:6px;border-radius:6px}
+    .small{font-size:13px;color:var(--muted)}
+    @media (max-width:520px){body{padding:12px}}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>To‑Do List</h1>
+      <div class="small">Saved in localStorage</div>
+    </header>
+
+    <section class="card">
+      <!-- Add task -->
+      <form id="task-form">
+        <input id="task-input" type="text" placeholder="Add a new task and press Enter" maxlength="200" autocomplete="off" />
+        <button type="submit">Add</button>
+      </form>
+
+      <div class="controls">
+        <button id="clear-completed" class="btn-ghost small">Clear completed</button>
+        <div style="flex:1"></div>
+        <label class="small">Filter:
+          <select id="filter" aria-label="Filter tasks">
+            <option value="all">All</option>
+            <option value="active">Active</option>
+            <option value="completed">Completed</option>
+          </select>
+        </label>
+      </div>
+
+      <ul id="task-list" aria-live="polite"></ul>
+
+      <div id="footer" class="small" style="margin-top:12px">0 tasks left</div>
+    </section>
+  </div>
+
+  <script>
+    // ----------------------
+    // Simple To‑Do App (Vanilla JS)
+    // Features: add, edit, delete, toggle complete, filter, clear completed
+    // Upgrade: stores tasks in localStorage so they persist between reloads
+    // ----------------------
+
+    const TASKS_KEY = 'todo_tasks_v1';
+
+    // In-memory array of task objects: {id, text, completed, createdAt}
+    let tasks = loadTasks();
+    let currentFilter = 'all';
+
+    // DOM refs
+    const form = document.getElementById('task-form');
+    const input = document.getElementById('task-input');
+    const list = document.getElementById('task-list');
+    const clearBtn = document.getElementById('clear-completed');
+    const filterSelect = document.getElementById('filter');
+    const footer = document.getElementById('footer');
+
+    // ---------- Initialization ----------
+    renderTasks();
+
+    // ---------- Helpers ----------
+    function generateId(){
+      return Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+    }
+
+    function saveTasks(){
+      try{
+        localStorage.setItem(TASKS_KEY, JSON.stringify(tasks));
+      }catch(e){
+        console.error('Could not save to localStorage', e);
+      }
+    }
+
+    function loadTasks(){
+      try{
+        const raw = localStorage.getItem(TASKS_KEY);
+        return raw ? JSON.parse(raw) : [];
+      }catch(e){
+        console.error('Could not load tasks', e);
+        return [];
+      }
+    }
+
+    function createTask(text){
+      return { id: generateId(), text, completed:false, createdAt: Date.now() };
+    }
+
+    // ---------- CRUD operations ----------
+    function addTask(text){
+      tasks.unshift(createTask(text)); // newest first
+      saveTasks();
+      renderTasks();
+    }
+
+    function deleteTask(id){
+      tasks = tasks.filter(t => t.id !== id);
+      saveTasks();
+      renderTasks();
+    }
+
+    function toggleComplete(id){
+      tasks = tasks.map(t => t.id === id ? {...t, completed: !t.completed} : t);
+      saveTasks();
+      renderTasks();
+    }
+
+    function updateTaskText(id, newText){
+      tasks = tasks.map(t => t.id === id ? {...t, text: newText} : t);
+      saveTasks();
+      renderTasks();
+    }
+
+    function clearCompleted(){
+      tasks = tasks.filter(t => !t.completed);
+      saveTasks();
+      renderTasks();
+    }
+
+    // ---------- Rendering ----------
+    function renderTasks(){
+      list.innerHTML = '';
+      const visible = tasks.filter(t => {
+        if(currentFilter === 'all') return true;
+        if(currentFilter === 'active') return !t.completed;
+        if(currentFilter === 'completed') return t.completed;
+      });
+
+      visible.forEach(task => {
+        const li = document.createElement('li');
+        li.className = 'task' + (task.completed ? ' completed' : '');
+        li.dataset.id = task.id;
+
+        // checkbox
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.className = 'toggle';
+        cb.checked = task.completed;
+        cb.setAttribute('aria-label', 'Mark task completed');
+
+        // text
+        const span = document.createElement('span');
+        span.className = 'task-text';
+        span.textContent = task.text;
+
+        // buttons
+        const editBtn = document.createElement('button');
+        editBtn.className = 'btn-ghost edit';
+        editBtn.title = 'Edit task';
+        editBtn.innerHTML = '✏️';
+
+        const delBtn = document.createElement('button');
+        delBtn.className = 'btn-ghost delete';
+        delBtn.title = 'Delete task';
+        delBtn.innerHTML = '🗑️';
+
+        li.appendChild(cb);
+        li.appendChild(span);
+        li.appendChild(editBtn);
+        li.appendChild(delBtn);
+
+        list.appendChild(li);
+      });
+
+      // footer info
+      const left = tasks.filter(t => !t.completed).length;
+      footer.textContent = `${left} task${left === 1 ? '' : 's'} left`;
+    }
+
+    // ---------- Event listeners ----------
+    form.addEventListener('submit', e => {
+      e.preventDefault();
+      const text = input.value.trim();
+      if(!text) return; // ignore empty
+      addTask(text);
+      input.value = '';
+      input.focus();
+    });
+
+    // click delegation for edit/delete/toggle
+    list.addEventListener('click', e => {
+      const li = e.target.closest('li');
+      if(!li) return;
+      const id = li.dataset.id;
+
+      if(e.target.matches('.delete')){
+        // simple delete
+        deleteTask(id);
+        return;
+      }
+
+      if(e.target.matches('.edit')){
+        // turn the text span into an input for inline edit
+        const span = li.querySelector('.task-text');
+        const inputEdit = document.createElement('input');
+        inputEdit.type = 'text';
+        inputEdit.className = 'edit-input';
+        inputEdit.value = span.textContent;
+
+        // replace span with input
+        li.replaceChild(inputEdit, span);
+        inputEdit.focus();
+        // save on Enter, cancel on Escape, save on blur (if non-empty)
+        inputEdit.addEventListener('keydown', function(ev){
+          if(ev.key === 'Enter'){
+            const val = inputEdit.value.trim();
+            if(val) updateTaskText(id, val);
+            else renderTasks();
+          }
+          if(ev.key === 'Escape'){
+            renderTasks();
+          }
+        });
+        inputEdit.addEventListener('blur', function(){
+          const val = inputEdit.value.trim();
+          if(val) updateTaskText(id, val);
+          else renderTasks();
+        });
+
+        return;
+      }
+
+      if(e.target.matches('.toggle')){
+        toggleComplete(id);
+        return;
+      }
+    });
+
+    // keyboard toggle (space) and accessibility improvement
+    list.addEventListener('keydown', e => {
+      if(e.key === ' ' && e.target.matches('.task-text')){
+        e.preventDefault();
+        const li = e.target.closest('li');
+        toggleComplete(li.dataset.id);
+      }
+    });
+
+    clearBtn.addEventListener('click', () => {
+      clearCompleted();
+    });
+
+    filterSelect.addEventListener('change', () => {
+      currentFilter = filterSelect.value;
+      renderTasks();
+    });
+
+    // ---------- End of script ----------
+  </script>
+</body>
+</html>
